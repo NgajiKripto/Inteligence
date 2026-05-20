@@ -1,14 +1,37 @@
 services:
-  mirofish:
-    image: ghcr.io/666ghj/mirofish:latest
-    # 加速镜像（如拉取缓慢可替换上方地址）
-    # image: ghcr.nju.edu.cn/666ghj/mirofish:latest
-    container_name: mirofish
+  # Backend API Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: memecoin-intel-backend
     env_file:
       - .env
     ports:
-      - "3000:3000"
       - "5001:5001"
-    restart: unless-stopped
     volumes:
-      - ./backend/uploads:/app/backend/uploads
+      - ./backend/data:/app/backend/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend Dev Server (development only)
+  frontend:
+    image: node:18-alpine
+    container_name: memecoin-intel-frontend
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_BASE=http://backend:5001
+    depends_on:
+      - backend
+    profiles:
+      - dev

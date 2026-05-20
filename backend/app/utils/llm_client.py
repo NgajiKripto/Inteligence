@@ -1,103 +1,154 @@
 """
-LLM客户端封装
-统一使用OpenAI格式调用
+LLM Client - Unified interface for LLM calls (OpenAI-compatible)
+Supports OpenAI, DeepSeek, Qwen, and any OpenAI-format API
 """
 
 import json
-import re
-from typing import Optional, Dict, Any, List
+from typing import List, Dict, Any, Optional
+
 from openai import OpenAI
 
 from ..config import Config
+from .logger import get_logger
+
+logger = get_logger('memecoin.utils.llm')
 
 
 class LLMClient:
-    """LLM客户端"""
+    """Unified LLM client using OpenAI SDK format"""
     
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model: Optional[str] = None
-    ):
+    def __init__(self, api_key: str = None, base_url: str = None, model: str = None):
         self.api_key = api_key or Config.LLM_API_KEY
         self.base_url = base_url or Config.LLM_BASE_URL
         self.model = model or Config.LLM_MODEL_NAME
-        
-        if not self.api_key:
-            raise ValueError("LLM_API_KEY 未配置")
         
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=self.base_url
         )
     
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        temperature: float = 0.7,
-        max_tokens: int = 4096,
-        response_format: Optional[Dict] = None
-    ) -> str:
+    def chat(self, prompt: str, temperature: float = 0.7,
+             max_tokens: int = 4096, system_prompt: str = None) -> str:
         """
-        发送聊天请求
+        Simple chat completion with a single prompt
         
         Args:
-            messages: 消息列表
-            temperature: 温度参数
-            max_tokens: 最大token数
-            response_format: 响应格式（如JSON模式）
+            prompt: User message
+            temperature: Creativity (0.0 = deterministic, 1.0 = creative)
+            max_tokens: Max response length
+            system_prompt: Optional system message
             
         Returns:
-            模型响应文本
+            Response text
         """
-        kwargs = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
+        messages = []
         
-        if response_format:
-            kwargs["response_format"] = response_format
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
         
-        response = self.client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
-        # 部分模型（如MiniMax M2.5）会在content中包含<think>思考内容，需要移除
-        content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
-        return content
+        messages.append({"role": "user", "content": prompt})
+        
+        return self.chat_messages(messages, temperature=temperature, max_tokens=max_tokens)
     
-    def chat_json(
-        self,
-        messages: List[Dict[str, str]],
-        temperature: float = 0.3,
-        max_tokens: int = 4096
-    ) -> Dict[str, Any]:
+    def chat_messages(self, messages: List[Dict[str, str]],
+                      temperature: float = 0.7,
+                      max_tokens: int = 4096) -> str:
         """
-        发送聊天请求并返回JSON
+        Chat completion with full message history
         
         Args:
-            messages: 消息列表
-            temperature: 温度参数
-            max_tokens: 最大token数
+            messages: List of {"role": "...", "content": "..."} messages
+            temperature: Creativity level
+            max_tokens: Max response length
             
         Returns:
-            解析后的JSON对象
+            Response text
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            
+            content = response.choices[0].message.content
+            
+            # Log usage
+            usage = response.usage
+            if usage:
+                logger.debug(
+                    f"LLM call: model={self.model}, "
+                    f"prompt_tokens={usage.prompt_tokens}, "
+                    f"completion_tokens={usage.completion_tokens}"
+                )
+            
+            return content or ""
+            
+        except Exception as e:
+            logger.error(f"LLM call failed: {e}")
+            raise
+    
+    def chat_json(self, prompt: str, temperature: float = 0.3,
+                  system_prompt: str = None) -> Dict[str, Any]:
+        """
+        Chat completion expecting JSON response
+        Automatically parses JSON from response
+        
+        Args:
+            prompt: User message (should instruct JSON output)
+            temperature: Lower is better for structured output
+            system_prompt: Optional system message
+            
+        Returns:
+            Parsed JSON dictionary
         """
         response = self.chat(
-            messages=messages,
+            prompt=prompt,
             temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"}
+            system_prompt=system_prompt
         )
-        # 清理markdown代码块标记
-        cleaned_response = response.strip()
-        cleaned_response = re.sub(r'^```(?:json)?\s*\n?', '', cleaned_response, flags=re.IGNORECASE)
-        cleaned_response = re.sub(r'\n?```\s*$', '', cleaned_response)
-        cleaned_response = cleaned_response.strip()
-
+        
+        return self._parse_json(response)
+    
+    def _parse_json(self, text: str) -> Dict[str, Any]:
+        """Parse JSON from LLM response, handling markdown code blocks"""
+        # Try direct parse
         try:
-            return json.loads(cleaned_response)
+            return json.loads(text)
         except json.JSONDecodeError:
-            raise ValueError(f"LLM返回的JSON格式无效: {cleaned_response}")
-
+            pass
+        
+        # Try extracting from markdown code block
+        if "```json" in text:
+            try:
+                json_str = text.split("```json")[1].split("```")[0].strip()
+                return json.loads(json_str)
+            except (json.JSONDecodeError, IndexError):
+                pass
+        
+        if "```" in text:
+            try:
+                json_str = text.split("```")[1].split("```")[0].strip()
+                return json.loads(json_str)
+            except (json.JSONDecodeError, IndexError):
+                pass
+        
+        # Try finding JSON object in text
+        try:
+            start = text.index('{')
+            end = text.rindex('}') + 1
+            return json.loads(text[start:end])
+        except (ValueError, json.JSONDecodeError):
+            pass
+        
+        # Try finding JSON array
+        try:
+            start = text.index('[')
+            end = text.rindex(']') + 1
+            return json.loads(text[start:end])
+        except (ValueError, json.JSONDecodeError):
+            pass
+        
+        logger.warning(f"Failed to parse JSON from LLM response: {text[:200]}...")
+        return {"raw_response": text, "parse_error": True}

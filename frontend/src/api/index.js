@@ -1,69 +1,44 @@
 import axios from 'axios'
-import i18n from '../i18n'
 
-// 创建axios实例
-const service = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001',
-  timeout: 300000, // 5分钟超时（本体生成可能需要较长时间）
-  headers: {
-    'Content-Type': 'application/json'
-  }
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5001'
+
+const api = axios.create({
+  baseURL: API_BASE,
+  timeout: 60000,
+  headers: { 'Content-Type': 'application/json' }
 })
 
-// 请求拦截器
-service.interceptors.request.use(
-  config => {
-    config.headers['Accept-Language'] = i18n.global.locale.value
-    return config
-  },
-  error => {
-    console.error('Request error:', error)
-    return Promise.reject(error)
-  }
-)
-
-// 响应拦截器（容错重试机制）
-service.interceptors.response.use(
-  response => {
-    const res = response.data
-    
-    // 如果返回的状态码不是success，则抛出错误
-    if (!res.success && res.success !== undefined) {
-      console.error('API Error:', res.error || res.message || 'Unknown error')
-      return Promise.reject(new Error(res.error || res.message || 'Error'))
-    }
-    
-    return res
-  },
-  error => {
-    console.error('Response error:', error)
-    
-    // 处理超时
-    if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {
-      console.error('Request timeout')
-    }
-    
-    // 处理网络错误
-    if (error.message === 'Network Error') {
-      console.error('Network error - please check your connection')
-    }
-    
-    return Promise.reject(error)
-  }
-)
-
-// 带重试的请求函数
-export const requestWithRetry = async (requestFn, maxRetries = 3, delay = 1000) => {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await requestFn()
-    } catch (error) {
-      if (i === maxRetries - 1) throw error
-      
-      console.warn(`Request failed, retrying (${i + 1}/${maxRetries})...`)
-      await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)))
-    }
-  }
+// === Token API ===
+export const tokenApi = {
+  discover: (data) => api.post('/api/token/discover', data),
+  trending: (params) => api.get('/api/token/trending', { params }),
+  watchlist: (params) => api.get('/api/token/watchlist', { params }),
+  getToken: (tokenId) => api.get(`/api/token/${tokenId}`),
+  getMetrics: (tokenId) => api.get(`/api/token/${tokenId}/metrics`),
+  getHolders: (tokenId, params) => api.get(`/api/token/${tokenId}/holders`, { params }),
+  getRisk: (tokenId) => api.get(`/api/token/${tokenId}/risk`),
+  remove: (tokenId) => api.delete(`/api/token/${tokenId}`),
+  search: (params) => api.get('/api/token/search', { params }),
 }
 
-export default service
+// === Analysis API ===
+export const analysisApi = {
+  start: (data) => api.post('/api/analysis/start', data),
+  status: (sessionId) => api.get(`/api/analysis/status/${sessionId}`),
+  report: (sessionId) => api.get(`/api/analysis/report/${sessionId}`),
+  simulate: (data) => api.post('/api/analysis/simulate', data),
+  chat: (data) => api.post('/api/analysis/chat', data),
+  history: (params) => api.get('/api/analysis/history', { params }),
+}
+
+// === Signal API ===
+export const signalApi = {
+  list: (params) => api.get('/api/signal/list', { params }),
+  whaleActivity: (params) => api.get('/api/signal/whale-activity', { params }),
+  smartMoney: (params) => api.get('/api/signal/smart-money', { params }),
+  sentiment: (params) => api.get('/api/signal/sentiment', { params }),
+  newPairs: (params) => api.get('/api/signal/new-pairs', { params }),
+  rugCheck: (address, params) => api.get(`/api/signal/rug-check/${address}`, { params }),
+}
+
+export default api
