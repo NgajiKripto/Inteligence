@@ -50,14 +50,14 @@ class SentimentAnalyzer:
         twitter_score = result["twitter"].get("sentiment_score", 0)
         result["overall_sentiment"] = twitter_score
         
-        if twitter_score > 0.3:
-            result["sentiment_label"] = "bullish"
-        elif twitter_score > 0.6:
+        if twitter_score > 0.6:
             result["sentiment_label"] = "very_bullish"
-        elif twitter_score < -0.3:
-            result["sentiment_label"] = "bearish"
+        elif twitter_score > 0.3:
+            result["sentiment_label"] = "bullish"
         elif twitter_score < -0.6:
             result["sentiment_label"] = "very_bearish"
+        elif twitter_score < -0.3:
+            result["sentiment_label"] = "bearish"
         else:
             result["sentiment_label"] = "neutral"
         
@@ -80,22 +80,29 @@ class SentimentAnalyzer:
         """
         Get overall memecoin market sentiment
         
-        Returns aggregate sentiment across the memecoin ecosystem
+        Returns aggregate sentiment across the memecoin ecosystem.
+        Feeds real aggregated data from tracked tokens into the LLM prompt.
         """
-        # Use LLM to analyze general market mood
-        prompt = f"""Analyze the current memecoin market sentiment based on typical market indicators.
+        # Gather REAL market data to feed to LLM
+        real_data_summary = self._gather_market_data_summary(chain)
         
+        prompt = f"""Analyze the memecoin market sentiment based on the following REAL aggregated data.
+
 Chain focus: {chain}
 Timeframe: {timeframe}
 
-Provide a JSON response with:
+ACTUAL MARKET DATA:
+{real_data_summary}
+
+Based on this real data, provide a JSON response with:
 - overall_score: float from -1.0 (extreme fear) to 1.0 (extreme greed)
 - label: one of [extreme_fear, fear, neutral, greed, extreme_greed]
-- market_mood: brief description of current mood
-- hot_narratives: list of trending narratives/themes in memecoin space
+- market_mood: brief description based on the data above
+- hot_narratives: list of likely trending narratives given the data
 - risk_level: low/medium/high/extreme
-- notable_events: list of notable recent events affecting memecoins
+- data_driven: true
 
+IMPORTANT: Base your analysis ONLY on the data provided above. Do NOT hallucinate data points.
 Respond ONLY with valid JSON."""
 
         try:
@@ -126,6 +133,7 @@ Respond ONLY with valid JSON."""
             sentiment_data["chain"] = chain
             sentiment_data["timeframe"] = timeframe
             sentiment_data["updated_at"] = datetime.now().isoformat()
+            sentiment_data["data_source"] = "aggregated_market_data"
             
             return sentiment_data
             
@@ -139,6 +147,53 @@ Respond ONLY with valid JSON."""
                 "timeframe": timeframe,
                 "error": str(e)
             }
+    
+    def _gather_market_data_summary(self, chain: str) -> str:
+        """Gather real market data to provide context for sentiment analysis"""
+        try:
+            from .token_scanner import TokenScanner
+            from .price_tracker import PriceTracker
+            
+            scanner = TokenScanner()
+            tracker = PriceTracker.instance()
+            
+            # Get tracked tokens for aggregate stats
+            tokens = scanner.get_watchlist(status='all', sort_by='volume')
+            
+            if not tokens:
+                # Try trending if no watchlist
+                tokens = scanner.get_trending(chain=chain, limit=10)
+            
+            if not tokens:
+                return "No tracked tokens available. Limited data for analysis."
+            
+            # Aggregate stats
+            total_tokens = len(tokens)
+            gainers = sum(1 for t in tokens if (t.metrics.price_change_24h or 0) > 0)
+            losers = sum(1 for t in tokens if (t.metrics.price_change_24h or 0) < 0)
+            avg_change = sum(t.metrics.price_change_24h or 0 for t in tokens) / max(total_tokens, 1)
+            total_volume = sum(t.metrics.volume_24h or 0 for t in tokens)
+            total_liquidity = sum(t.metrics.liquidity_usd or 0 for t in tokens)
+            
+            # Top movers
+            sorted_by_change = sorted(tokens, key=lambda t: t.metrics.price_change_24h or 0, reverse=True)
+            top_gainers = [(t.symbol, t.metrics.price_change_24h) for t in sorted_by_change[:3] if t.metrics.price_change_24h]
+            top_losers = [(t.symbol, t.metrics.price_change_24h) for t in sorted_by_change[-3:] if t.metrics.price_change_24h]
+            
+            summary = f"""- Tokens tracked: {total_tokens}
+- Gainers: {gainers}, Losers: {losers}
+- Average 24h change: {avg_change:+.1f}%
+- Total 24h volume: ${total_volume:,.0f}
+- Total liquidity: ${total_liquidity:,.0f}
+- Top gainers: {', '.join(f'{s} ({c:+.1f}%)' for s, c in top_gainers) or 'N/A'}
+- Top losers: {', '.join(f'{s} ({c:+.1f}%)' for s, c in top_losers) or 'N/A'}
+- Market direction: {'Bullish' if avg_change > 5 else 'Bearish' if avg_change < -5 else 'Neutral'}"""
+            
+            return summary
+            
+        except Exception as e:
+            logger.warning(f"Failed to gather market data: {e}")
+            return "Market data gathering failed. Provide general assessment only."
     
     def analyze_text_sentiment(self, texts: List[str]) -> Dict[str, Any]:
         """

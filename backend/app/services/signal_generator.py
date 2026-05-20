@@ -102,7 +102,7 @@ class SignalGenerator:
         from .price_tracker import PriceTracker
         
         scanner = TokenScanner()
-        tracker = PriceTracker()
+        tracker = PriceTracker.instance()
         
         token = scanner.get_token(token_id)
         if not token:
@@ -209,10 +209,10 @@ class SignalGenerator:
     # === Storage Methods ===
     
     def _save_signal(self, signal: Signal):
-        """Save signal to disk"""
+        """Save signal to disk atomically"""
+        from ..utils import atomic_write_json
         path = os.path.join(self.data_dir, f"{signal.signal_id}.json")
-        with open(path, 'w') as f:
-            json.dump(signal.to_dict(), f, indent=2)
+        atomic_write_json(path, signal.to_dict())
     
     def _load_all_signals(self) -> List[Signal]:
         """Load all saved signals"""

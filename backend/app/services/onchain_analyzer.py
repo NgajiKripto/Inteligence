@@ -12,6 +12,7 @@ import requests
 
 from ..config import Config
 from ..utils.logger import get_logger
+from ..utils import redact_url
 
 logger = get_logger('memecoin.services.onchain')
 
@@ -22,6 +23,16 @@ class OnChainAnalyzer:
     def __init__(self):
         self.solana_rpc = Config.SOLANA_RPC_URL
         self.helius_key = Config.HELIUS_API_KEY
+    
+    @property
+    def _helius_rpc_url(self) -> str:
+        """Helius RPC URL (keep key out of direct string interpolation in business logic)"""
+        return f"https://mainnet.helius-rpc.com/?api-key={self.helius_key}"
+    
+    @property
+    def _helius_api_url(self) -> str:
+        """Helius REST API URL"""
+        return f"https://api.helius.xyz/v0/token-metadata?api-key={self.helius_key}"
     
     def get_holder_analysis(self, token_id: str, top_n: int = 20) -> Dict[str, Any]:
         """
@@ -103,28 +114,32 @@ class OnChainAnalyzer:
             score = 100
             warnings = []
             
-            if not checks.get("mint_disabled", True):
+            # Only penalize if check was actually performed (not None)
+            mint_disabled = checks.get("mint_disabled")
+            if mint_disabled is False:  # Explicitly False, not None
                 score -= 30
                 warnings.append("Mint authority is NOT disabled - dev can create new tokens")
             
-            if not checks.get("freeze_disabled", True):
+            freeze_disabled = checks.get("freeze_disabled")
+            if freeze_disabled is False:  # Explicitly False, not None
                 score -= 20
                 warnings.append("Freeze authority is NOT disabled - dev can freeze wallets")
             
-            if checks.get("has_blacklist", False):
+            if checks.get("has_blacklist") is True:
                 score -= 15
                 warnings.append("Contract has blacklist function")
             
-            if not checks.get("lp_locked", False):
+            lp_locked = checks.get("lp_locked")
+            if lp_locked is False:  # Explicitly False, not None
                 score -= 25
                 warnings.append("Liquidity pool is NOT locked")
             
-            if checks.get("honeypot_risk", False):
+            if checks.get("honeypot_risk") is True:
                 score -= 40
                 warnings.append("HONEYPOT RISK DETECTED - selling may be restricted")
             
-            buy_tax = checks.get("tax_buy", 0)
-            sell_tax = checks.get("tax_sell", 0)
+            buy_tax = checks.get("tax_buy", 0) or 0
+            sell_tax = checks.get("tax_sell", 0) or 0
             if sell_tax > 10:
                 score -= 20
                 warnings.append(f"High sell tax: {sell_tax}%")
@@ -165,10 +180,7 @@ class OnChainAnalyzer:
     def _analyze_solana_holders(self, address: str, top_n: int) -> Dict[str, Any]:
         """Analyze Solana token holders via Helius"""
         try:
-            url = f"https://api.helius.xyz/v0/token-metadata?api-key={self.helius_key}"
-            
-            # Get token accounts (largest)
-            rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_key}"
+            rpc_url = self._helius_rpc_url
             payload = {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -221,8 +233,8 @@ class OnChainAnalyzer:
             }
             
         except Exception as e:
-            logger.error(f"Solana holder analysis failed: {e}")
-            return {"error": str(e)}
+            logger.error(f"Solana holder analysis failed: {redact_url(str(e))}")
+            return {"error": "Solana holder analysis failed"}
     
     def _check_solana_contract(self, address: str, safety: Dict) -> Dict:
         """Check Solana token contract safety"""
@@ -237,7 +249,7 @@ class OnChainAnalyzer:
                 }
                 return safety
             
-            rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_key}"
+            rpc_url = self._helius_rpc_url
             
             # Get mint info
             payload = {
@@ -273,8 +285,8 @@ class OnChainAnalyzer:
             return safety
             
         except Exception as e:
-            logger.error(f"Solana contract check failed: {e}")
-            safety["checks"] = {"error": str(e)}
+            logger.error(f"Solana contract check failed: {redact_url(str(e))}")
+            safety["checks"] = {"error": "Contract check failed"}
             return safety
     
     def _check_evm_contract(self, address: str, chain: str, safety: Dict) -> Dict:
@@ -295,7 +307,7 @@ class OnChainAnalyzer:
     def _get_solana_metadata(self, address: str) -> Dict[str, Any]:
         """Get Solana token metadata via Helius"""
         try:
-            url = f"https://api.helius.xyz/v0/token-metadata?api-key={self.helius_key}"
+            url = self._helius_api_url
             resp = requests.post(url, json={"mintAccounts": [address]}, timeout=10)
             
             if resp.status_code == 200:

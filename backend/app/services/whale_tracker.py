@@ -10,6 +10,7 @@ import requests
 
 from ..config import Config
 from ..utils.logger import get_logger
+from ..utils import redact_url
 
 logger = get_logger('memecoin.services.whale')
 
@@ -30,6 +31,11 @@ class WhaleTracker:
         self.helius_key = Config.HELIUS_API_KEY
         self.threshold_usd = Config.WHALE_ALERT_THRESHOLD_USD
         self.threshold_sol = Config.WHALE_ALERT_THRESHOLD_SOL
+    
+    @property
+    def _rpc_url(self) -> str:
+        """Helius RPC URL"""
+        return f"https://mainnet.helius-rpc.com/?api-key={self.helius_key}"
     
     def get_recent_activity(self, chain: str = "solana", min_amount_usd: float = 50000,
                             hours: int = 24, limit: int = 50) -> List[Dict[str, Any]]:
@@ -137,7 +143,7 @@ class WhaleTracker:
             # Use Helius parsed transaction history for known whale wallets
             # In production, this would query a database of tracked wallets
             
-            rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_key}"
+            rpc_url = self._rpc_url
             
             # For demo: get recent large transactions from the network
             # In production: would monitor specific whale wallets
@@ -155,13 +161,13 @@ class WhaleTracker:
             }]
             
         except Exception as e:
-            logger.error(f"Solana whale activity fetch failed: {e}")
-            return [{"error": str(e)}]
+            logger.error(f"Solana whale activity fetch failed: {redact_url(str(e))}")
+            return [{"error": "Whale activity fetch failed"}]
     
     def _get_solana_smart_money(self, action: str, hours: int, limit: int) -> List[Dict[str, Any]]:
         """Get smart money trades on Solana"""
         try:
-            rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_key}"
+            rpc_url = self._rpc_url
             trades = []
             
             # Query transaction history for known smart money wallets
@@ -201,13 +207,13 @@ class WhaleTracker:
             }]
             
         except Exception as e:
-            logger.error(f"Solana smart money fetch failed: {e}")
-            return [{"error": str(e)}]
+            logger.error(f"Solana smart money fetch failed: {redact_url(str(e))}")
+            return [{"error": "Smart money fetch failed"}]
     
     def _track_solana_wallet(self, wallet_address: str) -> Dict[str, Any]:
         """Track a specific Solana wallet"""
         try:
-            rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_key}"
+            rpc_url = self._rpc_url
             
             # Get SOL balance
             balance_payload = {
@@ -280,13 +286,13 @@ class WhaleTracker:
             }
             
         except Exception as e:
-            logger.error(f"Track Solana wallet failed: {e}")
-            return {"error": str(e), "wallet": wallet_address}
+            logger.error(f"Track Solana wallet failed: {redact_url(str(e))}")
+            return {"error": "Wallet tracking failed", "wallet": wallet_address}
     
     def _detect_token_whales_solana(self, token_address: str) -> Dict[str, Any]:
         """Detect whale wallets for a specific Solana token"""
         try:
-            rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_key}"
+            rpc_url = self._rpc_url
             
             # Get largest token holders
             payload = {

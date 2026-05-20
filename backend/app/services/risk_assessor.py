@@ -37,7 +37,7 @@ class RiskAssessor:
         
         # Gather data
         onchain = OnChainAnalyzer()
-        tracker = PriceTracker()
+        tracker = PriceTracker.instance()
         
         contract_safety = onchain.analyze_contract_safety(token.contract_address, token.chain)
         holder_data = onchain.analyze_holders(token.contract_address, token.chain)
@@ -69,7 +69,7 @@ class RiskAssessor:
         from .price_tracker import PriceTracker
         
         onchain = OnChainAnalyzer()
-        tracker = PriceTracker()
+        tracker = PriceTracker.instance()
         
         # Get contract safety
         contract_safety = onchain.analyze_contract_safety(token_address, chain)

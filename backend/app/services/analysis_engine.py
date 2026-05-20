@@ -216,7 +216,7 @@ class AnalysisEngine:
     def _analyze_market(self, address: str, chain: str) -> Dict[str, Any]:
         """Get market metrics"""
         from .price_tracker import PriceTracker
-        tracker = PriceTracker()
+        tracker = PriceTracker.instance()
         
         metrics = tracker.get_metrics_by_address(address, chain)
         buy_sell = tracker.get_buy_sell_ratio(address, chain)
@@ -362,7 +362,7 @@ Respond ONLY with valid JSON."""
     # === Storage ===
     
     def _save_session(self, session: AnalysisSession):
-        """Save session to disk"""
+        """Save session to disk atomically"""
+        from ..utils import atomic_write_json
         path = os.path.join(self.data_dir, f"{session.session_id}.json")
-        with open(path, 'w') as f:
-            json.dump(session.to_dict(), f, indent=2, default=str)
+        atomic_write_json(path, session.to_dict())

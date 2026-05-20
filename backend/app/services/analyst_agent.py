@@ -133,7 +133,7 @@ SIMULATION RESULTS:
         if token_address:
             try:
                 from .price_tracker import PriceTracker
-                tracker = PriceTracker()
+                tracker = PriceTracker.instance()
                 metrics = tracker.get_metrics_by_address(token_address)
                 
                 if not metrics.get("error"):
