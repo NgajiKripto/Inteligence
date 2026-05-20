@@ -71,6 +71,10 @@ class Config:
     RISK_SCORE_HIGH = float(os.environ.get('RISK_SCORE_HIGH', '0.7'))
     RISK_SCORE_CRITICAL = float(os.environ.get('RISK_SCORE_CRITICAL', '0.9'))
     
+    # Security
+    API_AUTH_KEY = os.environ.get('API_AUTH_KEY', '')  # If empty, auth is disabled (dev mode)
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000')
+    
     @classmethod
     def validate(cls):
         """Validate required configuration"""

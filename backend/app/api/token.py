@@ -2,29 +2,22 @@
 Token API - Endpoints for memecoin tracking, discovery, and data retrieval
 """
 
-import traceback
 from flask import request, jsonify
 
 from . import token_bp
 from ..config import Config
 from ..utils.logger import get_logger
+from ..utils import require_api_key, rate_limit, validate_contract_address
 
 logger = get_logger('memecoin.api.token')
 
 
 @token_bp.route('/discover', methods=['POST'])
+@require_api_key
+@rate_limit(max_requests=10, window_seconds=60)
 def discover_token():
     """
     Discover and analyze a new memecoin by contract address
-    
-    Request (JSON):
-        {
-            "contract_address": "So11...abc",
-            "chain": "solana",             // optional, default: solana
-            "auto_track": true             // optional, auto-add to watchlist
-        }
-    
-    Returns token data with initial risk assessment
     """
     try:
         data = request.get_json() or {}
@@ -36,6 +29,13 @@ def discover_token():
             return jsonify({
                 "success": False,
                 "error": "contract_address is required"
+            }), 400
+        
+        # Validate address format
+        if not validate_contract_address(contract_address, chain):
+            return jsonify({
+                "success": False,
+                "error": f"Invalid contract address format for chain '{chain}'"
             }), 400
         
         from ..services.token_scanner import TokenScanner
@@ -56,26 +56,18 @@ def discover_token():
         logger.error(f"Token discovery failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Token discovery failed. Please try again."
         }), 500
 
 
 @token_bp.route('/trending', methods=['GET'])
+@rate_limit(max_requests=30, window_seconds=60)
 def get_trending_tokens():
-    """
-    Get trending memecoins based on volume, social mentions, and new listings
-    
-    Query params:
-        chain: solana|ethereum|bsc (optional, default: all)
-        timeframe: 1h|6h|24h (optional, default: 24h)
-        limit: number of results (optional, default: 20)
-        sort_by: volume|social|holders|gainers (optional, default: volume)
-    """
+    """Get trending memecoins based on volume, social mentions, and new listings"""
     try:
         chain = request.args.get('chain', 'all')
         timeframe = request.args.get('timeframe', '24h')
-        limit = request.args.get('limit', 20, type=int)
+        limit = min(request.args.get('limit', 20, type=int), 100)
         sort_by = request.args.get('sort_by', 'volume')
         
         from ..services.token_scanner import TokenScanner
@@ -102,19 +94,14 @@ def get_trending_tokens():
         logger.error(f"Get trending failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to fetch trending tokens"
         }), 500
 
 
 @token_bp.route('/watchlist', methods=['GET'])
+@require_api_key
 def get_watchlist():
-    """
-    Get user's tracked tokens (watchlist)
-    
-    Query params:
-        status: tracked|alert|all (optional, default: all)
-        sort_by: risk|volume|price_change (optional, default: risk)
-    """
+    """Get user's tracked tokens (watchlist)"""
     try:
         status = request.args.get('status', 'all')
         sort_by = request.args.get('sort_by', 'risk')
@@ -136,7 +123,7 @@ def get_watchlist():
         logger.error(f"Get watchlist failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to fetch watchlist"
         }), 500
 
 
@@ -163,16 +150,17 @@ def get_token_detail(token_id: str):
         logger.error(f"Get token failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to get token details"
         }), 500
 
 
 @token_bp.route('/<token_id>/metrics', methods=['GET'])
+@rate_limit(max_requests=60, window_seconds=60)
 def get_token_metrics(token_id: str):
     """Get real-time price and trading metrics for a token"""
     try:
         from ..services.price_tracker import PriceTracker
-        tracker = PriceTracker()
+        tracker = PriceTracker.instance()
         
         metrics = tracker.get_live_metrics(token_id)
         
@@ -185,20 +173,16 @@ def get_token_metrics(token_id: str):
         logger.error(f"Get metrics failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to get token metrics"
         }), 500
 
 
 @token_bp.route('/<token_id>/holders', methods=['GET'])
+@rate_limit(max_requests=20, window_seconds=60)
 def get_token_holders(token_id: str):
-    """
-    Get holder analysis for a token
-    
-    Query params:
-        top_n: number of top holders to return (default: 20)
-    """
+    """Get holder analysis for a token"""
     try:
-        top_n = request.args.get('top_n', 20, type=int)
+        top_n = min(request.args.get('top_n', 20, type=int), 50)
         
         from ..services.onchain_analyzer import OnChainAnalyzer
         analyzer = OnChainAnalyzer()
@@ -214,11 +198,12 @@ def get_token_holders(token_id: str):
         logger.error(f"Get holders failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to get holder analysis"
         }), 500
 
 
 @token_bp.route('/<token_id>/risk', methods=['GET'])
+@rate_limit(max_requests=20, window_seconds=60)
 def get_token_risk(token_id: str):
     """Get comprehensive risk assessment for a token"""
     try:
@@ -236,11 +221,12 @@ def get_token_risk(token_id: str):
         logger.error(f"Risk assessment failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Risk assessment failed"
         }), 500
 
 
 @token_bp.route('/<token_id>', methods=['DELETE'])
+@require_api_key
 def remove_token(token_id: str):
     """Remove token from watchlist"""
     try:
@@ -263,19 +249,14 @@ def remove_token(token_id: str):
         logger.error(f"Remove token failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to remove token"
         }), 500
 
 
 @token_bp.route('/search', methods=['GET'])
+@rate_limit(max_requests=30, window_seconds=60)
 def search_tokens():
-    """
-    Search tokens by name or symbol
-    
-    Query params:
-        q: search query (name or symbol)
-        chain: filter by chain (optional)
-    """
+    """Search tokens by name or symbol"""
     try:
         query = request.args.get('q', '').strip()
         chain = request.args.get('chain', 'all')
@@ -303,5 +284,5 @@ def search_tokens():
         logger.error(f"Search failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Search failed"
         }), 500

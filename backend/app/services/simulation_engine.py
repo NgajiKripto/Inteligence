@@ -131,7 +131,7 @@ class SimulationEngine:
         from .price_tracker import PriceTracker
         from .onchain_analyzer import OnChainAnalyzer
         
-        tracker = PriceTracker()
+        tracker = PriceTracker.instance()
         onchain = OnChainAnalyzer()
         
         metrics = tracker.get_metrics_by_address(token_address, chain)

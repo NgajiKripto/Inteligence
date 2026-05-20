@@ -36,8 +36,13 @@ def create_app(config_class=Config):
         logger.info("MemeCoin Intelligence Backend Starting...")
         logger.info("=" * 50)
     
-    # Enable CORS
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    # Enable CORS (restricted in production, open in dev)
+    allowed_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
+    if app.config.get('DEBUG'):
+        # In dev mode, allow all origins for convenience
+        CORS(app, resources={r"/api/*": {"origins": "*"}})
+    else:
+        CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
     
     # Request logging middleware
     @app.before_request

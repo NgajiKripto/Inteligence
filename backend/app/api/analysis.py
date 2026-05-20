@@ -2,39 +2,24 @@
 Analysis API - Endpoints for AI-powered memecoin analysis and simulation
 """
 
-import traceback
 import threading
 from flask import request, jsonify
 
 from . import analysis_bp
 from ..config import Config
 from ..utils.logger import get_logger
+from ..utils import require_api_key, rate_limit, validate_contract_address
 
 logger = get_logger('memecoin.api.analysis')
 
 
 @analysis_bp.route('/start', methods=['POST'])
+@require_api_key
+@rate_limit(max_requests=5, window_seconds=300)
 def start_analysis():
     """
-    Start a comprehensive AI analysis session for a token
-    
-    This triggers the full pipeline:
-    1. On-chain data collection & safety check
-    2. Social sentiment analysis
-    3. Whale/smart money tracking
-    4. Multi-agent trading simulation
-    5. Report generation with recommendation
-    
-    Request (JSON):
-        {
-            "token_address": "So11...abc",
-            "chain": "solana",
-            "analysis_depth": "standard",   // quick|standard|deep
-            "simulate": true,               // run multi-agent simulation
-            "agent_count": 50               // number of simulation agents
-        }
-    
-    Returns immediately with session_id for progress polling
+    Start a comprehensive AI analysis session for a token.
+    Returns immediately with session_id for progress polling.
     """
     try:
         data = request.get_json() or {}
@@ -51,8 +36,15 @@ def start_analysis():
                 "error": "token_address is required"
             }), 400
         
-        # Validate agent count
-        agent_count = min(agent_count, Config.SIMULATION_MAX_AGENTS)
+        # Validate address format
+        if not validate_contract_address(token_address, chain):
+            return jsonify({
+                "success": False,
+                "error": f"Invalid contract address format for chain '{chain}'"
+            }), 400
+        
+        # Validate and cap agent count
+        agent_count = min(max(int(agent_count), 5), Config.SIMULATION_MAX_AGENTS)
         
         from ..services.analysis_engine import AnalysisEngine
         engine = AnalysisEngine()
@@ -71,7 +63,7 @@ def start_analysis():
             try:
                 engine.run_full_analysis(session.session_id)
             except Exception as e:
-                logger.error(f"Analysis failed: {str(e)}")
+                logger.error(f"Background analysis failed: {str(e)}")
         
         thread = threading.Thread(target=run_analysis, daemon=True)
         thread.start()
@@ -91,25 +83,13 @@ def start_analysis():
         logger.error(f"Start analysis failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Failed to start analysis. Please check your input and try again."
         }), 500
 
 
 @analysis_bp.route('/status/<session_id>', methods=['GET'])
 def get_analysis_status(session_id: str):
-    """
-    Get analysis session status and progress
-    
-    Returns:
-        {
-            "session_id": "sess_xxxx",
-            "status": "analyzing_social",
-            "progress": 45,
-            "current_step": "Analyzing Twitter sentiment...",
-            "partial_results": {...}
-        }
-    """
+    """Get analysis session status and progress"""
     try:
         from ..services.analysis_engine import AnalysisEngine
         engine = AnalysisEngine()
@@ -130,24 +110,13 @@ def get_analysis_status(session_id: str):
         logger.error(f"Get status failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to get session status"
         }), 500
 
 
 @analysis_bp.route('/report/<session_id>', methods=['GET'])
 def get_analysis_report(session_id: str):
-    """
-    Get the completed analysis report
-    
-    Returns full markdown report with:
-    - Executive summary
-    - On-chain safety assessment
-    - Social sentiment analysis
-    - Whale/smart money activity
-    - Multi-agent simulation results
-    - Risk factors
-    - Recommendation & confidence level
-    """
+    """Get the completed analysis report"""
     try:
         from ..services.analysis_engine import AnalysisEngine
         engine = AnalysisEngine()
@@ -186,27 +155,17 @@ def get_analysis_report(session_id: str):
         logger.error(f"Get report failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to retrieve report"
         }), 500
 
 
 @analysis_bp.route('/simulate', methods=['POST'])
+@require_api_key
+@rate_limit(max_requests=3, window_seconds=300)
 def run_simulation():
     """
-    Run multi-agent trading simulation for a token
-    
-    Creates a virtual trading environment with diverse AI agents
-    that make buy/sell/hold decisions based on available data.
-    
-    Request (JSON):
-        {
-            "token_address": "So11...abc",
-            "chain": "solana",
-            "agent_count": 50,
-            "rounds": 10,
-            "scenario": "neutral",     // bullish|neutral|bearish|crash
-            "inject_event": ""         // optional: simulate an event
-        }
+    Run multi-agent trading simulation for a token (async).
+    Returns a session_id to poll for results.
     """
     try:
         data = request.get_json() or {}
@@ -224,48 +183,101 @@ def run_simulation():
                 "error": "token_address is required"
             }), 400
         
-        from ..services.simulation_engine import SimulationEngine
-        sim_engine = SimulationEngine()
+        # Validate address format
+        if not validate_contract_address(token_address, chain):
+            return jsonify({
+                "success": False,
+                "error": f"Invalid contract address format for chain '{chain}'"
+            }), 400
         
-        result = sim_engine.run_simulation(
-            token_address=token_address,
-            chain=chain,
-            agent_count=agent_count,
-            rounds=rounds,
-            scenario=scenario,
-            inject_event=inject_event
-        )
+        # Run simulation in background thread to avoid blocking
+        import uuid
+        sim_id = f"sim_{uuid.uuid4().hex[:12]}"
+        
+        # Store placeholder result
+        from ..services.analysis_engine import AnalysisEngine
+        import os, json
+        result_dir = os.path.join(Config.DATA_DIR, 'simulations')
+        os.makedirs(result_dir, exist_ok=True)
+        result_path = os.path.join(result_dir, f"{sim_id}.json")
+        
+        # Write initial status
+        from ..utils import atomic_write_json
+        atomic_write_json(result_path, {"status": "running", "sim_id": sim_id})
+        
+        def run_sim():
+            try:
+                from ..services.simulation_engine import SimulationEngine
+                sim_engine = SimulationEngine()
+                
+                result = sim_engine.run_simulation(
+                    token_address=token_address,
+                    chain=chain,
+                    agent_count=agent_count,
+                    rounds=rounds,
+                    scenario=scenario,
+                    inject_event=inject_event
+                )
+                
+                atomic_write_json(result_path, {
+                    "status": "completed",
+                    "sim_id": sim_id,
+                    "data": result.model_dump() if hasattr(result, 'model_dump') else result
+                })
+            except Exception as e:
+                logger.error(f"Simulation {sim_id} failed: {str(e)}")
+                atomic_write_json(result_path, {
+                    "status": "failed",
+                    "sim_id": sim_id,
+                    "error": str(e)
+                })
+        
+        thread = threading.Thread(target=run_sim, daemon=True)
+        thread.start()
         
         return jsonify({
             "success": True,
-            "data": result.model_dump() if hasattr(result, 'model_dump') else result
+            "data": {
+                "sim_id": sim_id,
+                "status": "running",
+                "message": "Simulation started. Poll /api/analysis/simulate/status/<sim_id> for results."
+            }
         })
         
     except Exception as e:
-        logger.error(f"Simulation failed: {str(e)}")
+        logger.error(f"Simulation start failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Failed to start simulation"
         }), 500
 
 
+@analysis_bp.route('/simulate/status/<sim_id>', methods=['GET'])
+def get_simulation_status(sim_id: str):
+    """Get simulation result by sim_id"""
+    try:
+        import os, json
+        result_dir = os.path.join(Config.DATA_DIR, 'simulations')
+        result_path = os.path.join(result_dir, f"{sim_id}.json")
+        
+        if not os.path.exists(result_path):
+            return jsonify({"success": False, "error": "Simulation not found"}), 404
+        
+        with open(result_path, 'r') as f:
+            result = json.load(f)
+        
+        return jsonify({"success": True, "data": result})
+        
+    except Exception as e:
+        logger.error(f"Get simulation status failed: {str(e)}")
+        return jsonify({"success": False, "error": "Failed to get simulation status"}), 500
+
+
 @analysis_bp.route('/chat', methods=['POST'])
+@require_api_key
+@rate_limit(max_requests=20, window_seconds=60)
 def chat_with_analyst():
-    """
-    Chat with the AI analyst about a token or the market
-    
-    The AI analyst has access to all collected data, on-chain info,
-    social sentiment, and simulation results.
-    
-    Request (JSON):
-        {
-            "message": "Is this token safe to buy?",
-            "session_id": "sess_xxxx",      // optional, for context
-            "token_address": "So11...abc",  // optional, for context
-            "chat_history": [...]            // optional
-        }
-    """
+    """Chat with the AI analyst about a token or the market"""
     try:
         data = request.get_json() or {}
         
@@ -279,6 +291,16 @@ def chat_with_analyst():
                 "success": False,
                 "error": "message is required"
             }), 400
+        
+        # Limit message length
+        if len(message) > 2000:
+            return jsonify({
+                "success": False,
+                "error": "Message too long (max 2000 chars)"
+            }), 400
+        
+        # Limit chat history
+        chat_history = chat_history[-10:] if chat_history else []
         
         from ..services.analyst_agent import AnalystAgent
         agent = AnalystAgent()
@@ -299,21 +321,16 @@ def chat_with_analyst():
         logger.error(f"Chat failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Chat request failed. Please try again."
         }), 500
 
 
 @analysis_bp.route('/history', methods=['GET'])
+@require_api_key
 def get_analysis_history():
-    """
-    Get past analysis sessions
-    
-    Query params:
-        limit: max results (default: 20)
-        status: filter by status (optional)
-    """
+    """Get past analysis sessions"""
     try:
-        limit = request.args.get('limit', 20, type=int)
+        limit = min(request.args.get('limit', 20, type=int), 100)
         status = request.args.get('status', '')
         
         from ..services.analysis_engine import AnalysisEngine
@@ -333,5 +350,5 @@ def get_analysis_history():
         logger.error(f"Get history failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to get analysis history"
         }), 500

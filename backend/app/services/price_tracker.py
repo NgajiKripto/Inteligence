@@ -16,11 +16,30 @@ logger = get_logger('memecoin.services.price')
 
 
 class PriceTracker:
-    """Real-time price and metrics tracking"""
+    """Real-time price and metrics tracking (singleton for cache efficiency)"""
+    
+    _instance = None
+    _cache = {}  # Class-level cache shared across all calls
+    _cache_ttl = 30  # seconds
+    
+    @classmethod
+    def instance(cls) -> "PriceTracker":
+        """Get singleton instance (preserves cache across requests)"""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
     
     def __init__(self):
-        self.cache = {}
-        self.cache_ttl = 30  # seconds
+        # Instance can still be created directly for testing
+        pass
+    
+    @property
+    def cache(self):
+        return PriceTracker._cache
+    
+    @property
+    def cache_ttl(self):
+        return PriceTracker._cache_ttl
     
     def get_live_metrics(self, token_id: str) -> Dict[str, Any]:
         """

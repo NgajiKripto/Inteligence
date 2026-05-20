@@ -252,10 +252,10 @@ class TokenScanner:
             return {"name": "Unknown", "symbol": "???"}
     
     def _save_token(self, token: Token):
-        """Persist token to disk"""
+        """Persist token to disk atomically"""
+        from ..utils import atomic_write_json
         path = os.path.join(self.data_dir, f"{token.token_id}.json")
-        with open(path, 'w') as f:
-            json.dump(token.to_dict(), f, indent=2)
+        atomic_write_json(path, token.to_dict())
     
     def _load_all_tokens(self) -> List[Token]:
         """Load all saved tokens"""

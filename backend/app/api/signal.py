@@ -2,35 +2,26 @@
 Signal API - Endpoints for trading signals, alerts, and whale tracking
 """
 
-import traceback
 from flask import request, jsonify
 
 from . import signal_bp
 from ..config import Config
 from ..utils.logger import get_logger
+from ..utils import require_api_key, rate_limit, validate_contract_address
 
 logger = get_logger('memecoin.api.signal')
 
 
 @signal_bp.route('/list', methods=['GET'])
+@rate_limit(max_requests=30, window_seconds=60)
 def get_signals():
-    """
-    Get active trading signals
-    
-    Query params:
-        type: signal type filter (optional)
-        strength: minimum strength filter (optional)
-        chain: chain filter (optional)
-        token_id: filter by token (optional)
-        limit: max results (default: 50)
-        active_only: only show active signals (default: true)
-    """
+    """Get active trading signals"""
     try:
         signal_type = request.args.get('type', '')
         min_strength = request.args.get('strength', '')
         chain = request.args.get('chain', 'all')
         token_id = request.args.get('token_id', '')
-        limit = request.args.get('limit', 50, type=int)
+        limit = min(request.args.get('limit', 50, type=int), 100)
         active_only = request.args.get('active_only', 'true').lower() == 'true'
         
         from ..services.signal_generator import SignalGenerator
@@ -57,26 +48,19 @@ def get_signals():
         logger.error(f"Get signals failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to fetch signals"
         }), 500
 
 
 @signal_bp.route('/whale-activity', methods=['GET'])
+@rate_limit(max_requests=20, window_seconds=60)
 def get_whale_activity():
-    """
-    Get recent whale wallet activity
-    
-    Query params:
-        chain: solana|ethereum|bsc (default: solana)
-        min_amount_usd: minimum transaction USD value (default: 50000)
-        hours: lookback period in hours (default: 24)
-        limit: max results (default: 50)
-    """
+    """Get recent whale wallet activity"""
     try:
         chain = request.args.get('chain', 'solana')
         min_amount = request.args.get('min_amount_usd', 50000, type=float)
-        hours = request.args.get('hours', 24, type=int)
-        limit = request.args.get('limit', 50, type=int)
+        hours = min(request.args.get('hours', 24, type=int), 168)
+        limit = min(request.args.get('limit', 50, type=int), 100)
         
         from ..services.whale_tracker import WhaleTracker
         tracker = WhaleTracker()
@@ -102,26 +86,19 @@ def get_whale_activity():
         logger.error(f"Get whale activity failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to fetch whale activity"
         }), 500
 
 
 @signal_bp.route('/smart-money', methods=['GET'])
+@rate_limit(max_requests=20, window_seconds=60)
 def get_smart_money():
-    """
-    Track smart money wallets and their recent trades
-    
-    Query params:
-        chain: solana|ethereum|bsc (default: solana)
-        action: buy|sell|all (default: all)
-        hours: lookback period (default: 24)
-        limit: max results (default: 30)
-    """
+    """Track smart money wallets and their recent trades"""
     try:
         chain = request.args.get('chain', 'solana')
         action = request.args.get('action', 'all')
-        hours = request.args.get('hours', 24, type=int)
-        limit = request.args.get('limit', 30, type=int)
+        hours = min(request.args.get('hours', 24, type=int), 168)
+        limit = min(request.args.get('limit', 30, type=int), 100)
         
         from ..services.whale_tracker import WhaleTracker
         tracker = WhaleTracker()
@@ -146,19 +123,14 @@ def get_smart_money():
         logger.error(f"Get smart money failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to fetch smart money data"
         }), 500
 
 
 @signal_bp.route('/sentiment', methods=['GET'])
+@rate_limit(max_requests=10, window_seconds=60)
 def get_market_sentiment():
-    """
-    Get overall market sentiment for memecoins
-    
-    Query params:
-        chain: solana|ethereum|bsc|all (default: all)
-        timeframe: 1h|6h|24h|7d (default: 24h)
-    """
+    """Get overall market sentiment for memecoins"""
     try:
         chain = request.args.get('chain', 'all')
         timeframe = request.args.get('timeframe', '24h')
@@ -180,26 +152,19 @@ def get_market_sentiment():
         logger.error(f"Get sentiment failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to get market sentiment"
         }), 500
 
 
 @signal_bp.route('/new-pairs', methods=['GET'])
+@rate_limit(max_requests=20, window_seconds=60)
 def get_new_pairs():
-    """
-    Get newly created token pairs (potential early entries)
-    
-    Query params:
-        chain: solana|ethereum|bsc (default: solana)
-        hours: how far back to look (default: 24)
-        min_liquidity: minimum liquidity USD (default: 1000)
-        limit: max results (default: 30)
-    """
+    """Get newly created token pairs (potential early entries)"""
     try:
         chain = request.args.get('chain', 'solana')
-        hours = request.args.get('hours', 24, type=int)
+        hours = min(request.args.get('hours', 24, type=int), 168)
         min_liquidity = request.args.get('min_liquidity', 1000, type=float)
-        limit = request.args.get('limit', 30, type=int)
+        limit = min(request.args.get('limit', 30, type=int), 100)
         
         from ..services.token_scanner import TokenScanner
         scanner = TokenScanner()
@@ -225,19 +190,23 @@ def get_new_pairs():
         logger.error(f"Get new pairs failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Failed to fetch new pairs"
         }), 500
 
 
 @signal_bp.route('/rug-check/<token_address>', methods=['GET'])
+@rate_limit(max_requests=20, window_seconds=60)
 def rug_check(token_address: str):
-    """
-    Quick rug-pull risk check for a token
-    
-    Returns safety score and specific risk indicators
-    """
+    """Quick rug-pull risk check for a token"""
     try:
         chain = request.args.get('chain', 'solana')
+        
+        # Validate address format
+        if not validate_contract_address(token_address, chain):
+            return jsonify({
+                "success": False,
+                "error": f"Invalid contract address format for chain '{chain}'"
+            }), 400
         
         from ..services.risk_assessor import RiskAssessor
         assessor = RiskAssessor()
@@ -256,5 +225,5 @@ def rug_check(token_address: str):
         logger.error(f"Rug check failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "Rug check failed"
         }), 500
