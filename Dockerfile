@@ -1,29 +1,49 @@
-FROM python:3.11
+# ============================================
+# MemeCoin Intelligence - Multi-stage Dockerfile
+# ============================================
 
-# 安装 Node.js （满足 >=18）及必要工具
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends nodejs npm \
-  && rm -rf /var/lib/apt/lists/*
+# Stage 1: Build frontend
+FROM node:18-alpine AS frontend-build
 
-# 从 uv 官方镜像复制 uv
-COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Production image
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# 先复制依赖描述文件以利用缓存
-COPY package.json package-lock.json ./
-COPY frontend/package.json frontend/package-lock.json ./frontend/
-COPY backend/pyproject.toml backend/uv.lock ./backend/
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# 安装依赖（Node + Python）
-RUN npm ci \
-  && npm ci --prefix frontend \
-  && cd backend && uv sync --frozen
+# Install Python dependencies
+COPY backend/requirements.txt /app/backend/
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
-# 复制项目源码
-COPY . .
+# Copy backend code
+COPY backend/ /app/backend/
 
-EXPOSE 3000 5001
+# Copy built frontend
+COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
-# 同时启动前后端（开发模式）
-CMD ["npm", "run", "dev"]
+# Create data directories
+RUN mkdir -p /app/backend/data/tokens \
+             /app/backend/data/signals \
+             /app/backend/data/sessions \
+             /app/backend/uploads
+
+# Expose ports
+EXPOSE 5001 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:5001/health || exit 1
+
+# Start backend (frontend served via nginx or directly)
+WORKDIR /app/backend
+CMD ["python", "run.py"]

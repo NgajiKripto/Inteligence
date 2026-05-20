@@ -1,12 +1,11 @@
 """
-MiroFish Backend - Flask应用工厂
+MemeCoin Intelligence - Flask Application Factory
+AI-powered memecoin trading analysis platform
 """
 
 import os
 import warnings
 
-# 抑制 multiprocessing resource_tracker 的警告（来自第三方库如 transformers）
-# 需要在所有其他导入之前设置
 warnings.filterwarnings("ignore", message=".*resource_tracker.*")
 
 from flask import Flask, request
@@ -17,64 +16,61 @@ from .utils.logger import setup_logger, get_logger
 
 
 def create_app(config_class=Config):
-    """Flask应用工厂函数"""
+    """Flask application factory"""
     app = Flask(__name__)
     app.config.from_object(config_class)
     
-    # 设置JSON编码：确保中文直接显示（而不是 \uXXXX 格式）
-    # Flask >= 2.3 使用 app.json.ensure_ascii，旧版本使用 JSON_AS_ASCII 配置
+    # JSON encoding: display unicode directly
     if hasattr(app, 'json') and hasattr(app.json, 'ensure_ascii'):
         app.json.ensure_ascii = False
     
-    # 设置日志
-    logger = setup_logger('mirofish')
+    # Setup logging
+    logger = setup_logger('memecoin')
     
-    # 只在 reloader 子进程中打印启动信息（避免 debug 模式下打印两次）
     is_reloader_process = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     debug_mode = app.config.get('DEBUG', False)
     should_log_startup = not debug_mode or is_reloader_process
     
     if should_log_startup:
         logger.info("=" * 50)
-        logger.info("MiroFish Backend 启动中...")
+        logger.info("MemeCoin Intelligence Backend Starting...")
         logger.info("=" * 50)
     
-    # 启用CORS
+    # Enable CORS
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     
-    # 注册模拟进程清理函数（确保服务器关闭时终止所有模拟进程）
-    from .services.simulation_runner import SimulationRunner
-    SimulationRunner.register_cleanup()
-    if should_log_startup:
-        logger.info("已注册模拟进程清理函数")
-    
-    # 请求日志中间件
+    # Request logging middleware
     @app.before_request
     def log_request():
-        logger = get_logger('mirofish.request')
-        logger.debug(f"请求: {request.method} {request.path}")
-        if request.content_type and 'json' in request.content_type:
-            logger.debug(f"请求体: {request.get_json(silent=True)}")
+        req_logger = get_logger('memecoin.request')
+        req_logger.debug(f"Request: {request.method} {request.path}")
     
     @app.after_request
     def log_response(response):
-        logger = get_logger('mirofish.request')
-        logger.debug(f"响应: {response.status_code}")
+        req_logger = get_logger('memecoin.request')
+        req_logger.debug(f"Response: {response.status_code}")
         return response
     
-    # 注册蓝图
-    from .api import graph_bp, simulation_bp, report_bp
-    app.register_blueprint(graph_bp, url_prefix='/api/graph')
-    app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
-    app.register_blueprint(report_bp, url_prefix='/api/report')
+    # Register blueprints
+    from .api import token_bp, analysis_bp, signal_bp
+    app.register_blueprint(token_bp, url_prefix='/api/token')
+    app.register_blueprint(analysis_bp, url_prefix='/api/analysis')
+    app.register_blueprint(signal_bp, url_prefix='/api/signal')
     
-    # 健康检查
+    # Health check
     @app.route('/health')
     def health():
-        return {'status': 'ok', 'service': 'MiroFish Backend'}
+        return {
+            'status': 'ok',
+            'service': 'MemeCoin Intelligence',
+            'version': '1.0.0'
+        }
+    
+    # Ensure data directories exist
+    os.makedirs(Config.DATA_DIR, exist_ok=True)
+    os.makedirs(Config.UPLOADS_DIR, exist_ok=True)
     
     if should_log_startup:
-        logger.info("MiroFish Backend 启动完成")
+        logger.info("MemeCoin Intelligence Backend Ready")
     
     return app
-
