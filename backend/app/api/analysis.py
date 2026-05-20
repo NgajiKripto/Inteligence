@@ -517,13 +517,14 @@ def add_watched_wallet():
         address = data.get('address', '').strip()
         label = data.get('label', '').strip()
         tags = data.get('tags', ['smart_money'])
+        chain = data.get('chain', 'solana')
 
         if not address or not label:
             return jsonify({"success": False, "error": "address and label required"}), 400
 
         from ..services.wallet_watchlist import WalletWatchlist
         wl = WalletWatchlist()
-        result = wl.add_wallet(address, label, tags)
+        result = wl.add_wallet(address, label, tags, chain=chain)
 
         if "error" in result:
             return jsonify({"success": False, "error": result["error"]}), 400

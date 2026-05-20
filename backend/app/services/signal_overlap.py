@@ -2,13 +2,18 @@
 Signal Overlap Scorer - Multi-source signal overlap detection.
 Inspired by Charon's requirement of 2+ independent signal sources.
 Tokens appearing in multiple data feeds simultaneously get higher priority.
+
+State is persisted to disk so overlap data survives restarts.
 """
 
-from datetime import datetime, timedelta
+import os
+import json
+from datetime import datetime
 from typing import Dict, Any, List
 
 from ..config import Config
 from ..utils.logger import get_logger
+from ..utils import atomic_write_json
 
 logger = get_logger('memecoin.services.overlap')
 
@@ -26,12 +31,14 @@ class SignalOverlapScorer:
     5. New pair detection
     6. Smart money entry
     7. GMGN trending
+    
+    State is persisted to disk to survive restarts.
     """
 
     def __init__(self):
-        # Track recent signals per token
-        self._signal_events: Dict[str, List[Dict]] = {}
         self._overlap_window_ms = 30 * 60 * 1000  # 30 min window
+        self._data_file = os.path.join(Config.DATA_DIR, 'signal_overlap.json')
+        self._signal_events: Dict[str, List[Dict]] = self._load_state()
 
     def record_signal(self, token_address: str, source: str, 
                       data: Dict[str, Any] = None):
@@ -48,6 +55,8 @@ class SignalOverlapScorer:
 
         # Prune old events
         self._prune_events(token_address)
+        # Persist to disk
+        self._save_state()
 
     def get_overlap_score(self, token_address: str) -> Dict[str, Any]:
         """
@@ -111,6 +120,7 @@ class SignalOverlapScorer:
         # Prune all
         for addr in list(self._signal_events.keys()):
             self._prune_events(addr)
+        self._save_state()
 
         results = []
         for addr in self._signal_events:
@@ -141,6 +151,28 @@ class SignalOverlapScorer:
 
         if not self._signal_events[token_address]:
             del self._signal_events[token_address]
+
+    def _load_state(self) -> Dict[str, List[Dict]]:
+        """Load persisted state from disk"""
+        if not os.path.exists(self._data_file):
+            return {}
+        try:
+            with open(self._data_file, 'r') as f:
+                data = json.load(f)
+            return data.get("events", {})
+        except Exception:
+            return {}
+
+    def _save_state(self):
+        """Persist state to disk"""
+        try:
+            os.makedirs(os.path.dirname(self._data_file), exist_ok=True)
+            atomic_write_json(self._data_file, {
+                "events": self._signal_events,
+                "saved_at": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            logger.warning(f"Failed to persist overlap state: {e}")
 
 
 # Singleton instance

@@ -25,9 +25,20 @@ class WalletWatchlist:
         self.data_file = os.path.join(Config.DATA_DIR, 'wallet_watchlist.json')
         self._ensure_file()
 
-    def add_wallet(self, address: str, label: str, tags: List[str] = None) -> Dict:
+    def add_wallet(self, address: str, label: str, tags: List[str] = None,
+                   chain: str = "solana") -> Dict:
         """Add a wallet to the watchlist"""
+        from ..utils import validate_contract_address
+
+        # Validate address format
+        if not validate_contract_address(address, chain):
+            return {"error": f"Invalid wallet address format for chain '{chain}'"}
+
         wallets = self._load()
+
+        # Cap at 100 wallets max
+        if len(wallets) >= 100:
+            return {"error": "Wallet watchlist full (max 100). Remove some before adding."}
 
         if address in wallets:
             return {"error": f"Wallet {address[:8]}... already tracked as '{wallets[address]['label']}'"}
@@ -36,6 +47,7 @@ class WalletWatchlist:
             "address": address,
             "label": label,
             "tags": tags or ["smart_money"],
+            "chain": chain,
             "added_at": datetime.now().isoformat(),
         }
 

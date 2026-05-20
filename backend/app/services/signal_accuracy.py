@@ -59,6 +59,12 @@ class SignalAccuracyTracker:
 
             results["total_signals"] += 1
 
+            # Only evaluate signals that are at least 6 hours old
+            # (recent signals haven't had time for price to move)
+            signal_age_hours = (datetime.now() - created).total_seconds() / 3600
+            if signal_age_hours < 6:
+                continue  # Too recent to evaluate fairly
+
             # Get current price
             try:
                 metrics = tracker.get_metrics_by_address(signal.token_address, signal.chain)

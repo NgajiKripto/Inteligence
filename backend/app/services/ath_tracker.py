@@ -46,21 +46,33 @@ class AthTracker:
             current_price = float(pair.get("priceUsd", 0) or 0)
             price_change_24h = float(pair.get("priceChange", {}).get("h24", 0) or 0)
 
-            # Estimate 24h high from current price and change
-            # If price went up 50% in 24h, the low was current/(1+0.5)
-            # For ATH estimation, we use price change data
+            # Estimate 24h high/low from percentage changes.
+            # NOTE: This is an approximation. DexScreener only provides period-end changes,
+            # not intraday highs. For tokens that pumped and dumped within 24h, the actual
+            # ATH may be higher than estimated here. Flag this limitation in results.
+            #
+            # Math: if current = start * (1 + change/100), then start = current / (1 + change/100)
+            # The start-of-period price is a proxy for the other extreme.
             if price_change_24h > 0:
-                estimated_24h_low = current_price / (1 + price_change_24h / 100)
-                estimated_24h_high = current_price  # Current is near high if going up
+                # Price went up: start was lower, current is at/near high
+                estimated_period_start = current_price / (1 + price_change_24h / 100)
+                estimated_24h_low = estimated_period_start
+                estimated_24h_high = current_price
+            elif price_change_24h < 0:
+                # Price went down: start was higher (this is the estimated 24h high)
+                estimated_period_start = current_price / (1 + price_change_24h / 100)
+                estimated_24h_low = current_price
+                estimated_24h_high = estimated_period_start
             else:
                 estimated_24h_low = current_price
-                estimated_24h_high = current_price / (1 + price_change_24h / 100)
+                estimated_24h_high = current_price
 
-            # Use 6h change to refine ATH estimate
+            # Use 6h change to refine: if 6h change differs from 24h, price moved intraday
             price_change_6h = float(pair.get("priceChange", {}).get("h6", 0) or 0)
-            if price_change_6h < price_change_24h:
-                # Price was higher earlier in the 24h period
-                estimated_24h_high = max(estimated_24h_high, current_price / (1 + price_change_6h / 100))
+            if price_change_6h != 0:
+                estimated_6h_start = current_price / (1 + price_change_6h / 100)
+                # The max of all estimated start prices gives better ATH approximation
+                estimated_24h_high = max(estimated_24h_high, estimated_6h_start, current_price)
 
             range_high = max(current_price, estimated_24h_high)
             range_low = min(current_price, estimated_24h_low) if estimated_24h_low > 0 else current_price

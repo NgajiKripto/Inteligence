@@ -32,6 +32,9 @@ class GmgnEnrichment:
     def enrich_token(self, mint: str) -> Optional[Dict[str, Any]]:
         """
         Fetch enhanced token data from GMGN.
+        
+        NOTE: This method has a built-in rate-limit delay. Do NOT call from
+        the main request thread. Use only from background analysis tasks.
 
         Returns:
             - rug_ratio: probability of rug pull (0-1)
@@ -51,11 +54,15 @@ class GmgnEnrichment:
             if time.time() - cached_at < CACHE_TTL:
                 return cached_data
 
-        # Rate limiting
+        # Rate limiting (non-blocking check - skip if too soon instead of sleeping)
         global _last_request_at
         elapsed = time.time() - _last_request_at
         if elapsed < self.request_delay:
-            time.sleep(self.request_delay - elapsed)
+            # Return cached data if available, otherwise skip
+            if mint in _gmgn_cache:
+                return _gmgn_cache[mint][1]
+            logger.debug(f"GMGN rate limit: skipping {mint[:8]}... (next in {self.request_delay - elapsed:.1f}s)")
+            return None
 
         try:
             url = "https://openapi.gmgn.ai/v1/token/info"
