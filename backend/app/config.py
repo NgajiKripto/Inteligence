@@ -47,6 +47,7 @@ class Config:
     # On-Chain Analysis
     HELIUS_API_KEY = os.environ.get('HELIUS_API_KEY', '')  # Solana enhanced RPC
     SOLSCAN_API_KEY = os.environ.get('SOLSCAN_API_KEY', '')
+    GMGN_API_KEY = os.environ.get('GMGN_API_KEY', '')  # GMGN enrichment (rug ratio, fees)
     
     # Data Storage
     DATA_DIR = os.path.join(os.path.dirname(__file__), '../data')

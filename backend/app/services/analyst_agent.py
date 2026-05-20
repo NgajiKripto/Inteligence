@@ -98,6 +98,16 @@ class AnalystAgent:
         """Build context from available data"""
         context_parts = []
         
+        # Inject active learning lessons
+        try:
+            from .learning_engine import LearningEngine
+            learning = LearningEngine()
+            lessons_text = learning.get_lessons_for_prompt()
+            if lessons_text:
+                context_parts.append(lessons_text)
+        except Exception:
+            pass
+        
         # Load session data if available
         if session_id:
             try:

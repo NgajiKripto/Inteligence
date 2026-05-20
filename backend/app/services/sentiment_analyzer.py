@@ -293,6 +293,9 @@ Respond ONLY with valid JSON."""
                 reverse=True
             )[:5]
             
+            # Calculate virality scoring (inspired by Charon)
+            virality = self._calculate_virality(top_tweets)
+
             return {
                 "mention_count": len(tweets),
                 "sentiment_score": sentiment.get("sentiment_score", 0),
@@ -301,6 +304,7 @@ Respond ONLY with valid JSON."""
                 "fud_level": sentiment.get("fud_level", 0),
                 "bot_likelihood": sentiment.get("bot_likelihood", 0),
                 "key_themes": sentiment.get("key_themes", []),
+                "virality": virality,
                 "top_tweets": [
                     {
                         "text": t.get("text", "")[:200],
@@ -314,3 +318,57 @@ Respond ONLY with valid JSON."""
         except Exception as e:
             logger.error(f"Twitter analysis failed: {e}")
             return {"mention_count": 0, "sentiment_score": 0, "error": str(e)}
+
+    def _calculate_virality(self, tweets: List[Dict]) -> Dict[str, Any]:
+        """
+        Calculate virality score based on engagement metrics.
+        Inspired by Charon's viralityScore function.
+        Differentiates organic hype from bot spam.
+        """
+        if not tweets:
+            return {"score": 0, "label": "none", "engagement_total": 0}
+
+        total_engagement = 0
+        total_views = 0
+
+        for tweet in tweets:
+            metrics = tweet.get("public_metrics", {})
+            likes = metrics.get("like_count", 0)
+            retweets = metrics.get("retweet_count", 0)
+            quotes = metrics.get("quote_count", 0)
+            replies = metrics.get("reply_count", 0)
+
+            engagement = likes + retweets * 2 + quotes * 2 + replies
+            total_engagement += engagement
+
+            # Views not always available in basic Twitter API
+            views = metrics.get("impression_count", 0)
+            total_views += views
+
+        # Engagement per view ratio (if views available)
+        engagement_per_view = (total_engagement / total_views * 100) if total_views > 0 else None
+
+        # Score based on total engagement across top tweets
+        if total_engagement > 10000:
+            score = 1.0
+            label = "viral"
+        elif total_engagement > 5000:
+            score = 0.8
+            label = "high_engagement"
+        elif total_engagement > 1000:
+            score = 0.6
+            label = "moderate_engagement"
+        elif total_engagement > 200:
+            score = 0.3
+            label = "low_engagement"
+        else:
+            score = 0.1
+            label = "minimal"
+
+        return {
+            "score": score,
+            "label": label,
+            "engagement_total": total_engagement,
+            "engagement_per_view_pct": round(engagement_per_view, 2) if engagement_per_view else None,
+            "total_views": total_views if total_views > 0 else None,
+        }

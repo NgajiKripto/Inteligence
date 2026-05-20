@@ -116,6 +116,22 @@ class AnalysisEngine:
             session.progress = 90
             self._save_session(session)
             
+            # Step 5.5: Fresh re-check before report (inspired by Charon)
+            session.current_step = "Fresh data re-check before report..."
+            fresh_market = self._analyze_market(session.token_address, session.chain)
+            fresh_price = fresh_market.get("metrics", {}).get("price_usd", 0)
+            original_price = market_data.get("metrics", {}).get("price_usd", 0)
+            
+            # Flag significant price movement during analysis
+            if original_price > 0 and fresh_price > 0:
+                price_drift_pct = abs(fresh_price - original_price) / original_price * 100
+                if price_drift_pct > 20:
+                    session.key_findings = session.key_findings or []
+                    session.key_findings.append(
+                        f"WARNING: Price moved {price_drift_pct:.1f}% during analysis. Data may be stale."
+                    )
+                    market_data = fresh_market  # Use fresh data for report
+            
             # Step 6: Generate report
             session.status = AnalysisStatus.GENERATING_REPORT
             session.current_step = "Generating comprehensive analysis report..."
