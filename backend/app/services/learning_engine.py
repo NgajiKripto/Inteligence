@@ -85,13 +85,26 @@ class LearningEngine:
         except Exception:
             return []
 
-    def get_lessons_for_prompt(self) -> str:
-        """Format active lessons for LLM prompt injection"""
+    def get_lessons_for_prompt(self, max_chars: int = 1500) -> str:
+        """Format active lessons for LLM prompt injection with token budget cap"""
         lessons = self.get_active_lessons()
         if not lessons:
             return ""
 
-        formatted = "\n".join(f"- {lesson}" for lesson in lessons)
+        # Cap total character count to avoid flooding LLM context
+        formatted_lines = []
+        total_chars = 0
+        for lesson in lessons:
+            line = f"- {lesson[:200]}"  # Cap each lesson at 200 chars
+            if total_chars + len(line) > max_chars:
+                break
+            formatted_lines.append(line)
+            total_chars += len(line)
+
+        if not formatted_lines:
+            return ""
+
+        formatted = "\n".join(formatted_lines)
         return f"\nACTIVE LESSONS FROM PAST ANALYSIS (apply these):\n{formatted}\n"
 
     def get_learning_history(self, limit: int = 10) -> List[Dict]:
@@ -146,9 +159,12 @@ class LearningEngine:
                     predicted_24h = session.simulation.predicted_price_24h or 0
                     if predicted_24h > 0:
                         prediction_error = abs(current_price - predicted_24h) / predicted_24h * 100
+                        # Direction logic: BUY/HOLD is correct if actual price >= entry price
+                        # SELL/AVOID is correct if actual price < entry price
+                        price_went_up = current_price >= predicted_24h
                         direction_correct = (
-                            (predicted_24h > current_price and session.recommendation in ["SELL", "AVOID"]) or
-                            (predicted_24h <= current_price and session.recommendation in ["BUY", "HOLD"])
+                            (price_went_up and session.recommendation in ["BUY", "HOLD"]) or
+                            (not price_went_up and session.recommendation in ["SELL", "AVOID"])
                         )
                     else:
                         prediction_error = None

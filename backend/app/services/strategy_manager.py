@@ -193,6 +193,9 @@ class StrategyManager:
 
         metrics = token_data.get("metrics", {})
         on_chain = token_data.get("on_chain", {})
+        overlap = token_data.get("overlap", {})
+        gmgn = token_data.get("gmgn", {})
+        wallet_overlap = token_data.get("wallet_overlap", {})
 
         # Market cap
         mcap = metrics.get("market_cap", 0)
@@ -221,6 +224,53 @@ class StrategyManager:
             failures.append("mint authority not disabled (required)")
         if params.get("require_lp_locked") and on_chain.get("lp_locked") is False:
             failures.append("LP not locked (required)")
+
+        # Top holder concentration
+        top10_pct = metrics.get("top10_holders_pct", 0)
+        if params.get("max_top10_holder_pct", 100) < 100 and top10_pct > params["max_top10_holder_pct"]:
+            failures.append(f"top10 holders {top10_pct:.0f}% > max {params['max_top10_holder_pct']}%")
+
+        # Token age
+        max_age_hours = params.get("max_token_age_hours", 0)
+        if max_age_hours > 0:
+            token_age_hours = metrics.get("token_age_hours", 0)
+            if token_age_hours > max_age_hours:
+                failures.append(f"token age {token_age_hours:.0f}h > max {max_age_hours}h")
+
+        # Signal overlap
+        min_overlap = params.get("min_overlap_signals", 0)
+        if min_overlap > 0:
+            overlap_count = overlap.get("overlap_count", 0) if isinstance(overlap, dict) else 0
+            if overlap_count < min_overlap:
+                failures.append(f"signal overlap {overlap_count} < min {min_overlap}")
+
+        # Smart wallet overlap
+        min_smart = params.get("min_smart_wallet_overlap", 0)
+        if min_smart > 0:
+            smart_count = wallet_overlap.get("overlap_count", 0) if isinstance(wallet_overlap, dict) else 0
+            if smart_count < min_smart:
+                failures.append(f"smart wallet overlap {smart_count} < min {min_smart}")
+
+        # ATH distance (for dip buy)
+        max_ath_dist = params.get("max_ath_distance_pct", 0)
+        if max_ath_dist < 0:
+            ath_dist = metrics.get("distance_from_ath_pct", 0)
+            if ath_dist > max_ath_dist:
+                failures.append(f"ATH distance {ath_dist:.0f}% > target {max_ath_dist}%")
+
+        # GMGN rug ratio
+        max_rug = params.get("max_rug_ratio", 0)
+        if max_rug > 0 and gmgn:
+            rug_ratio = gmgn.get("rug_ratio") or 0
+            if rug_ratio > max_rug:
+                failures.append(f"rug ratio {rug_ratio:.2f} > max {max_rug}")
+
+        # GMGN bundler rate
+        max_bundler = params.get("max_bundler_rate", 0)
+        if max_bundler > 0 and gmgn:
+            bundler_rate = gmgn.get("bundler_rate") or 0
+            if bundler_rate > max_bundler:
+                failures.append(f"bundler rate {bundler_rate:.2f} > max {max_bundler}")
 
         return {
             "passed": len(failures) == 0,
